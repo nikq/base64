@@ -1,7 +1,7 @@
 #pragma once
 
 /*
- * simple base64 implement in C++11
+ * Simple base64 encoder/decoder in C++11
  * copyright(c) 2017 Hajime UCHIMURA (@nikq, nikutama@gmail.com)
  *
  * MIT License
@@ -14,8 +14,9 @@
 #include <stdio.h>
 #include <vector>
 #include <algorithm>
+#include <cassert>
 
-static std::vector<uint8_t> base64_encode(const std::vector<uint8_t> &bin)
+inline std::vector<uint8_t> base64_encode(const std::vector<uint8_t> &bin)
 {
     const size_t s = bin.size();
     if (!s)
@@ -41,66 +42,78 @@ static std::vector<uint8_t> base64_encode(const std::vector<uint8_t> &bin)
     }
     return result;
 }
-static std::vector<uint8_t> base64_decode(const std::vector<uint8_t> &b64)
+
+inline std::vector<uint8_t> base64_decode(const std::vector<uint8_t> &b64)
 {
     const size_t s = b64.size();
-    if (!s)
+    if (s == 0)
         return std::vector<uint8_t>();
+    assert (s % 4 == 0) ;
+    assert (4 <= s) ;
+    size_t cntFullBlock = s / 4 - 1 ;
 
-    int i = s - 1;
-    while (b64[i] == '=' && i >= 1)
-        i--;
-    size_t bin_length = (i + 1) * 3 / 4;
-    auto decode = [](uint8_t uc) {
-        return ('A' <= uc && uc <= 'Z') ? (uc - 'A') : (('a' <= uc && uc <= 'z') ? (26 + uc - 'a') : (('0' <= uc && uc <= '9') ? (52 + uc - '0') : ((uc == '+') ? 62 : ((uc == '/') ? 63 : 0xFF))));
+    auto decode = [] (uint8_t uc) {
+        if ('A' <= uc && uc <= 'Z') {
+            return uc - 'A' ;
+        }
+        if ('a' <= uc && uc <= 'z') {
+            return 26 + uc - 'a' ;
+        }
+        if ('0' <= uc && uc <= '9') {
+            return 52 + uc - '0' ;
+        }
+        if (uc == '+') {
+            return 62 ;
+        }
+        if (uc == '/') {
+            return 63 ;
+        }
+        assert (false) ;
+        return 0 ;
     };
-    std::vector<uint8_t> bin(bin_length);
-    for (size_t i = 0, j = 0; i < s; i += 4, j += 3)
-    {
-        const uint8_t a012345 = decode(b64[i + 0]);
-        const uint8_t a670123 = decode(b64[i + 1]);
-        const uint8_t b456701 = decode(b64[i + 2]);
-        const uint8_t c234567 = decode(b64[i + 3]);
-        if (a012345 <= 63 && a670123 <= 63)
-            bin[j + 0] = (a012345 << 2) | (a670123 >> 4);
-        if (a012345 <= 63 && a670123 <= 63)
-            bin[j + 1] = (a670123 << 4) | (b456701 >> 2);
-        if (b456701 <= 63 && c234567 <= 63)
-            bin[j + 2] = (b456701 << 6) | (c234567 >> 0);
-    }
-    return bin;
-}
+    std::vector<uint8_t>    result ;
+    result.reserve (3 * cntFullBlock) ;
+    for (size_t i = 0 ; i < cntFullBlock ; ++i) {
+        const uint8_t a012345 = decode (b64 [4 * i + 0]);
+        const uint8_t a670123 = decode (b64 [4 * i + 1]);
+        const uint8_t b456701 = decode (b64 [4 * i + 2]);
+        const uint8_t c234567 = decode (b64 [4 * i + 3]);
 
-#if 0
-int main(void)
-{
-    srand(time(NULL));
-    printf("test for 0-65\n");
-    /*for (int i = 0; i < 65; i++)
-    {
-        uint8_t encoded = base64_encode_char(i);
-        uint8_t decoded = base64_decode_char(encoded);
-        printf("%08x > %c > %08x, %s\n", i, encoded, decoded, i == decoded ? "OK" : "NG");
-    }*/
-    for (int a = 1; a < 5; a++)
-    {
-        printf("------- test for some %d-bytes buffer\n", a);
-        for (int i = 0; i < 5; i++)
-        {
-            size_t length = a * (1 + rand() % 5);
-            printf("---- length %zu\n", length);
-            std::vector<uint8_t> src(length);
-            std::for_each(src.begin(), src.end(), [](uint8_t &x) mutable { x = rand(); });
-            std::vector<uint8_t> b64 = base64_encode(src);
-            std::vector<uint8_t> bin = base64_decode(b64);
-            std::for_each(src.begin(), src.end(), [](const uint8_t x) { printf("%02x,", x); });
-            printf(" >> ");
-            std::for_each(b64.begin(), b64.end(), [](const uint8_t x) { printf("%c", x); });
-            printf("\n");
-            std::for_each(bin.begin(), bin.end(), [](const uint8_t x) { printf("%02x,", x); });
-            printf("\n");
+        result.emplace_back ((a012345 << 2) | (a670123 >> 4)) ;
+        result.emplace_back ((a670123 << 4) | (b456701 >> 2)) ;
+        result.emplace_back ((b456701 << 6) | (c234567 >> 0)) ;
+    }
+    // Process the last block
+    auto lastIdx = 4 * cntFullBlock ;
+    assert (lastIdx < b64.size ()) ;
+    if (b64 [lastIdx + 3] == '=') {
+        if (b64 [lastIdx + 2] == '=') {
+            // Last block contains 1 octet.
+            const uint8_t a012345 = decode (b64 [lastIdx + 0]);
+            const uint8_t a670123 = decode (b64 [lastIdx + 1]);
+            result.emplace_back ((a012345 << 2) | (a670123 >> 4)) ;
+        }
+        else {
+            // Last block contains 2 octet.
+            const uint8_t a012345 = decode (b64 [lastIdx + 0]);
+            const uint8_t a670123 = decode (b64 [lastIdx + 1]);
+            const uint8_t b456701 = decode (b64 [lastIdx + 2]);
+            result.emplace_back ((a012345 << 2) | (a670123 >> 4)) ;
+            result.emplace_back ((a670123 << 4) | (b456701 >> 2)) ;
         }
     }
+    else {
+        // Full block (contains 3 octet).
+        const uint8_t a012345 = decode (b64 [lastIdx + 0]);
+        const uint8_t a670123 = decode (b64 [lastIdx + 1]);
+        const uint8_t b456701 = decode (b64 [lastIdx + 2]);
+        const uint8_t c234567 = decode (b64 [lastIdx + 3]);
+
+        result.emplace_back ((a012345 << 2) | (a670123 >> 4)) ;
+        result.emplace_back ((a670123 << 4) | (b456701 >> 2)) ;
+        result.emplace_back ((b456701 << 6) | (c234567 >> 0)) ;
+    }
+    return result ;
 }
-#endif
+
 #endif
