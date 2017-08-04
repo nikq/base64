@@ -17,7 +17,7 @@
 #include <cassert>
 
 namespace Base64Internal {
-    uint8_t decode (uint8_t uc) {
+    inline uint8_t decode (uint8_t uc) {
         if ('A' <= uc && uc <= 'Z') {
             return uc - 'A' ;
         }
@@ -36,35 +36,90 @@ namespace Base64Internal {
         assert (false) ;
         return 0 ;
     }
+
+    inline uint8_t encode (uint8_t uc) {
+        if (uc < 26) {
+            return 'A' + uc ;
+        }
+        if (uc < 52) {
+            return 'a' + uc - 26 ;
+        }
+        if (uc < 62) {
+            return '0' + uc - 52 ;
+        }
+        if (uc == 62) {
+            return '+' ;
+        }
+        if (uc == 63) {
+            return '/' ;
+        }
+        assert (false) ;
+        return '=' ;
+    }
 }
 /**
  * Encodes supplied bytes into base64 encoded octets.
  */
 inline std::vector<uint8_t> base64_encode(const void *input, size_t length)
 {
+    using namespace Base64Internal ;
     const uint8_t * bin = static_cast<const uint8_t *> (input) ;
     if (length == 0) {
         return std::vector<uint8_t>();
     }
-    auto encode = [](uint8_t uc) {
-        return (uc < 26) ? ('A' + uc) : ((uc < 52) ? ('a' + uc - 26) : ((uc < 62) ? ('0' + uc - 52) : ((uc == 62) ? '+' : ((uc == 63) ? '/' : '='))));
-    };
 
-    std::vector<uint8_t> result(((length + 2) / 3) * 4);
-    for (size_t i = 0, j = 0; i < length; i += 3, j += 4)
-    {
-        const uint8_t a012345 = (i + 0 < length) ? (bin[i + 0] >> 2) & 0x3F : 0;
-        const uint8_t a67____ = (i + 0 < length) ? (bin[i + 0] << 4) & 0x3F : 0;
-        const uint8_t b__0123 = (i + 1 < length) ? (bin[i + 1] >> 4) & 0x3F : 0;
-        const uint8_t b4567__ = (i + 1 < length) ? (bin[i + 1] << 2) & 0x3F : 0;
-        const uint8_t c____01 = (i + 2 < length) ? (bin[i + 2] >> 6) & 0x3F : 0;
-        const uint8_t c234567 = (i + 2 < length) ? (bin[i + 2]) & 0x3F : 0;
-        result[j + 0] = (i + 0 < length) ? encode(a012345) : '=';
-        result[j + 1] = (i + 0 < length) ? encode(a67____ | b__0123) : '=';
-        result[j + 2] = (i + 1 < length) ? encode(b4567__ | c____01) : '=';
-        result[j + 3] = (i + 2 < length) ? encode(c234567) : '=';
+    size_t cntFullBlocks = length / 3 ;
+    std::vector<uint8_t>    result (4 * cntFullBlocks) ;
+
+    for (size_t i = 0 ; i < cntFullBlocks ; ++i) {
+        auto b0 = bin [3 * i + 0] ;
+        const uint8_t a012345 = (b0 >> 2) & 0x3Fu ;
+        const uint8_t a67____ = (b0 << 4) & 0x3Fu ;
+        auto b1 = bin [3 * i + 1] ;
+        const uint8_t b__0123 = (b1 >> 4) & 0x3Fu ;
+        const uint8_t b4567__ = (b1 << 2) & 0x3Fu ;
+        auto b2 = bin [3 * i + 2] ;
+        const uint8_t c____01 = (b2 >> 6) & 0x3Fu ;
+        const uint8_t c234567 = (b2 >> 0) & 0x3Fu ;
+
+        result [4 * i + 0] = encode (a012345) ;
+        result [4 * i + 1] = encode (a67____ | b__0123) ;
+        result [4 * i + 2] = encode (b4567__ | c____01) ;
+        result [4 * i + 3] = encode (c234567) ;
     }
-    return result;
+    auto lastIdx = 3 * cntFullBlocks ;
+    assert (lastIdx <= length) ;
+    switch (length - lastIdx) {
+    case 0:
+        // NO-OP
+        break ;
+    case 1: {
+        auto b0 = bin [lastIdx + 0] ;
+        const uint8_t a012345 = (b0 >> 2) & 0x3Fu ;
+        const uint8_t a67____ = (b0 << 4) & 0x3Fu ;
+        result.emplace_back (encode (a012345)) ;
+        result.emplace_back (encode (a67____)) ;
+        result.emplace_back ('=') ;
+        result.emplace_back ('=') ;
+        break ;
+    }
+    case 2: {
+        auto b0 = bin [lastIdx + 0] ;
+        const uint8_t a012345 = (b0 >> 2) & 0x3Fu ;
+        const uint8_t a67____ = (b0 << 4) & 0x3Fu ;
+        auto b1 = bin [lastIdx + 1] ;
+        const uint8_t b__0123 = (b1 >> 4) & 0x3Fu ;
+        const uint8_t b4567__ = (b1 << 2) & 0x3Fu ;
+        result.emplace_back (encode (a012345)) ;
+        result.emplace_back (encode (a67____ | b__0123)) ;
+        result.emplace_back (encode (b4567__)) ;
+        result.emplace_back ('=') ;
+        break ;
+    }
+    default:
+        assert (false) ;
+    }
+    return result ;
 }
 
 /**
